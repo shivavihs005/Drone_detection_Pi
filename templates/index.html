@@ -175,8 +175,13 @@
                     // Update Status Indicator
                     const statusIndicator = document.getElementById('status-indicator');
                     if (data.is_detected) {
-                        statusIndicator.innerText = 'DRONE DETECTED';
-                        statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-red-500 bg-red-500/20 text-red-500 font-bold uppercase tracking-widest text-lg transition-all duration-300 shadow-[0_0_15px_rgba(239,68,68,0.5)] animate-pulse';
+                        if (data.api_confirmed) {
+                            statusIndicator.innerText = 'API CONFIRMED DRONE';
+                            statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-red-500 bg-red-600 font-bold text-white uppercase tracking-widest text-lg transition-all duration-300 shadow-[0_0_20px_rgba(239,68,68,0.8)] animate-pulse';
+                        } else {
+                            statusIndicator.innerText = 'LOCAL DETECT (AWAITING API)';
+                            statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-orange-500 bg-orange-500/20 text-orange-500 font-bold uppercase tracking-widest text-lg transition-all duration-300 shadow-[0_0_15px_rgba(249,115,22,0.5)]';
+                        }
                     } else {
                         statusIndicator.innerText = 'Monitoring';
                         statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-slate-600 text-slate-400 font-bold uppercase tracking-widest text-lg transition-all duration-300';

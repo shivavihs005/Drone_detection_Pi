@@ -5,6 +5,7 @@ import sys
 from camera_module import CameraModule
 from audio_module import AudioModule
 from fusion_module import FusionModule
+from api_client import api_client
 
 app = Flask(__name__)
 
@@ -59,15 +60,30 @@ def metrics():
     
     fused = fusion.fuse(vis_conf, aud_conf)
     
-    # Check threshold for detection
+    # Check threshold for detection locally
     drone_detected = fused["is_detected"]
+    
+    api_confirmed = False
+    cloud_conf = 0.0
+    
+    if drone_detected:
+        api_res = api_client.finalize_detection(cam_data.get("frame"), dom_freq, aud_conf)
+        api_confirmed = api_res.get("drone_confirmed", False)
+        cloud_conf = api_res.get("cloud_confidence", 0.0)
+        
+        # Optionally, stringently require API confirmation
+        drone_detected = api_confirmed
     
     return jsonify({
         "vision_confidence": fused["vision"],
         "audio_confidence": fused["audio"],
         "fusion_confidence": fused["fusion"],
         "dominant_freq": dom_freq,
-        "is_detected": drone_detected
+        "is_detected": drone_detected,
+        "api_confirmed": api_confirmed,
+        "cloud_confidence": cloud_conf,
+        "vision_enabled": camera.vision_enabled,
+        "audio_enabled": audio.audio_enabled
     })
 
 @app.route('/api/toggle', methods=['POST'])
