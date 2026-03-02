@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drone Detection System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        darkBg: '#0f172a',
+                        cardBg: '#1e293b',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-darkBg text-slate-300 font-sans min-h-screen p-6">
+
+    <div class="max-w-6xl mx-auto space-y-6">
+        
+        <!-- Header -->
+        <header class="flex items-center justify-between border-b border-slate-700 pb-4">
+            <div>
+                <h1 class="text-3xl font-bold text-white tracking-wide">MULTIMODAL DRONE DETECTION</h1>
+                <p class="text-slate-400 mt-1">Raspberry Pi 5 Edge Node</p>
+            </div>
+            <div id="status-indicator" class="px-6 py-2 rounded-full border-2 border-slate-600 text-slate-400 font-bold uppercase tracking-widest text-lg transition-all duration-300">
+                Monitoring
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Video Feed Column -->
+            <div class="lg:col-span-2 bg-cardBg rounded-xl p-4 shadow-xl border border-slate-700/50">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-white flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                        Live Video Feed
+                    </h2>
+                    <span class="text-xs font-mono text-slate-500">cam: plughw:0,0 | /dev/video0</span>
+                </div>
+                <div class="aspect-video bg-black rounded-lg overflow-hidden border border-slate-800 relative shadow-inner">
+                    <img src="/video_feed" alt="Live Stream" class="w-full h-full object-cover">
+                </div>
+            </div>
+
+            <!-- Metrics Column -->
+            <div class="bg-cardBg rounded-xl p-6 shadow-xl border border-slate-700/50 flex flex-col gap-6">
+                
+                <h2 class="text-xl font-semibold text-white border-b border-slate-700 pb-2">Sensor Telemetry</h2>
+
+                <!-- Vision Confidence Gauge -->
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <span class="text-sm font-medium text-slate-300 uppercase tracking-wider">Vision Model</span>
+                        <span id="vis-val" class="text-sm font-mono text-blue-400">0.0%</span>
+                    </div>
+                    <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
+                        <div id="vis-bar" class="bg-blue-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Audio Confidence Gauge -->
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <span class="text-sm font-medium text-slate-300 uppercase tracking-wider">Audio Acoustic</span>
+                        <span id="aud-val" class="text-sm font-mono text-emerald-400">0.0%</span>
+                    </div>
+                    <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
+                        <div id="aud-bar" class="bg-emerald-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <div class="mt-1 text-right">
+                        <span id="freq-val" class="text-xs font-mono text-slate-500">Peak: 0 Hz</span>
+                    </div>
+                </div>
+
+                <hr class="border-slate-700">
+
+                <!-- Fusion Score -->
+                <div class="pt-2">
+                    <div class="flex justify-between mb-1 items-end">
+                        <span class="text-base font-bold text-white uppercase tracking-wider">FUSION CONFIDENCE</span>
+                        <span id="fus-val" class="text-lg font-mono font-bold text-indigo-400">0.0%</span>
+                    </div>
+                    <div class="w-full bg-slate-900 rounded-full h-4 overflow-hidden shadow-inner border border-slate-700">
+                        <div id="fus-bar" class="bg-gradient-to-r from-indigo-600 to-purple-500 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="mt-auto pt-8">
+                     <p class="text-xs text-slate-500 text-center font-mono">Running local models. Weighting: 60% Vis / 40% Aud</p>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateMetrics() {
+            fetch('/metrics')
+                .then(response => response.json())
+                .then(data => {
+                    // Update numeric values
+                    document.getElementById('vis-val').innerText = (data.vision_confidence * 100).toFixed(1) + '%';
+                    document.getElementById('aud-val').innerText = (data.audio_confidence * 100).toFixed(1) + '%';
+                    document.getElementById('fus-val').innerText = (data.fusion_confidence * 100).toFixed(1) + '%';
+                    document.getElementById('freq-val').innerText = 'Peak: ' + data.dominant_freq + ' Hz';
+
+                    // Update bar widths
+                    document.getElementById('vis-bar').style.width = (data.vision_confidence * 100) + '%';
+                    document.getElementById('aud-bar').style.width = (data.audio_confidence * 100) + '%';
+                    document.getElementById('fus-bar').style.width = (data.fusion_confidence * 100) + '%';
+
+                    // Update Status Indicator
+                    const statusIndicator = document.getElementById('status-indicator');
+                    if (data.is_detected) {
+                        statusIndicator.innerText = 'DRONE DETECTED';
+                        statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-red-500 bg-red-500/20 text-red-500 font-bold uppercase tracking-widest text-lg transition-all duration-300 shadow-[0_0_15px_rgba(239,68,68,0.5)] animate-pulse';
+                    } else {
+                        statusIndicator.innerText = 'Monitoring';
+                        statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-slate-600 text-slate-400 font-bold uppercase tracking-widest text-lg transition-all duration-300';
+                    }
+                })
+                .catch(err => console.error("Error fetching metrics:", err));
+        }
+
+        // Poll at 10Hz (100ms)
+        setInterval(updateMetrics, 100);
+    </script>
+</body>
+</html>
