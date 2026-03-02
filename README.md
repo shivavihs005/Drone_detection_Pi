@@ -60,3 +60,10 @@ Once the setup script finishes and prints `[SYSTEM] System initialized successfu
 1. Open a web browser on any device connected to the same Wi-Fi.
 2. Go to `http://<YOUR_PI_IP_ADDRESS>:5000` (e.g., `http://192.168.1.100:5000`).
 3. You will see the local dashboard streaming the camera and showing detection confidence!
+
+
+
+cd /home/nitish/Drone_detection_Pi
+source drone_env/bin/activate
+python3 main_server.py
+
