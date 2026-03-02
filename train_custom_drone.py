@@ -45,17 +45,29 @@ def convert_coco_to_yolo(split_path):
             text_file.write(f"0 {x_center} {y_center} {w} {h}\n")
 
 if __name__ == '__main__':
-    dataset_dir = r"d:\Drone_Detection\Drone_detection_Pi\coco json drone detection"
+    import argparse
+    parser = argparse.ArgumentParser(description="Train YOLOv8 on a COCO dataset")
+    parser.add_argument('--dataset', type=str, default='coco json drone detection', help="Path to the COCO dataset directory")
+    args = parser.parse_args()
     
+    dataset_dir = args.dataset
+    dataset_dir_abs = os.path.abspath(dataset_dir)
+    
+    if not os.path.exists(dataset_dir):
+        print(f"Error: Dataset directory '{dataset_dir}' not found.")
+        print("Please ensure the folder exists or provide the correct path using: python train_custom_drone.py --dataset <path>")
+        exit(1)
+    
+    print(f"Using dataset directory: {dataset_dir_abs}")
     print("Converting COCO labels to YOLO format...")
     for split in ['train', 'valid', 'test']:
-        split_path = os.path.join(dataset_dir, split)
+        split_path = os.path.join(dataset_dir_abs, split)
         if os.path.exists(split_path):
             convert_coco_to_yolo(split_path)
             
     print("Creating dataset.yaml...")
     yaml_content = f"""
-path: '{dataset_dir}'
+path: '{dataset_dir_abs}'
 train: 'train'
 val: 'valid'
 test: 'test'
@@ -63,7 +75,7 @@ test: 'test'
 names:
   0: drone
 """
-    yaml_path = os.path.join(dataset_dir, 'dataset.yaml')
+    yaml_path = os.path.join(dataset_dir_abs, 'dataset.yaml')
     with open(yaml_path, 'w') as f:
         f.write(yaml_content)
 
