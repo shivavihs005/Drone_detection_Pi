@@ -15,7 +15,8 @@ class CameraModule:
         self.vision_enabled = True
         
         # Proxy labels from drone-detection-main since we use yolov8n.pt out of the box
-        self.proxy_labels = {"airplane", "helicopter", "bird"}
+        # Updated to use custom object 'drone'
+        self.proxy_labels = {"drone"}
 
         # Load YOLO model
         print("[CAMERA] Loading YOLO model...")
@@ -23,8 +24,11 @@ class CameraModule:
         # YOLOv8n automatically downloads to the current dir if not present
         if not os.path.exists('models'):
             os.makedirs('models')
+            
+        # Point to our new custom fast prototype model
+        model_path = 'runs/detect/train4/weights/best.pt'
         if not os.path.exists(model_path):
-            model_path = 'yolov8n.pt' # Let ultralytics download it
+            print(f"[CAMERA] WARNING: Custom model {model_path} not found. Ensure training finished successfully.")
 
         self.model = YOLO(model_path)
         
