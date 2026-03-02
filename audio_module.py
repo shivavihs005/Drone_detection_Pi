@@ -43,10 +43,13 @@ class AudioModule:
     def _capture_loop(self):
         print("[AUDIO] Starting ALSA capture from plughw:1,0...")
         
-        # Use arecord to pull robust ALSA stream from plughw:1,0
+        # Use arecord to pull robust ALSA stream from plughw:1,0 using S24_3LE format
         arecord_cmd = [
-            "arecord", "-D", "plughw:1,0", "-f", "S16_LE", "-r", str(self.RATE), "-c", "1", "-t", "raw"
+            "arecord", "-D", "plughw:1,0", "-f", "S24_3LE", "-r", str(self.RATE), "-c", "1", "-t", "raw"
         ]
+        
+        # 24-bit audio = 3 bytes per sample
+        self.CHUNK_BYTES = int(self.RATE * self.CHUNK_DURATION * 3)
         
         try:
             process = subprocess.Popen(arecord_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -58,9 +61,20 @@ class AudioModule:
             if process:
                 raw_data = process.stdout.read(self.CHUNK_BYTES)
                 if len(raw_data) == self.CHUNK_BYTES:
-                    audio_data = np.frombuffer(raw_data, dtype=np.int16)
+                    # Convert 3-byte 24-bit PCM (S24_3LE) to 32-bit integers using numpy
+                    # We can do this by allocating a 4-byte buffer, filling the lowest 3 bytes with data
+                    # and sign-extending the 4th byte. A simpler way in python is to reshape and pad.
+                    padded_data = np.zeros(len(raw_data) // 3 * 4, dtype=np.uint8)
+                    padded_data[0::4] = np.frombuffer(raw_data[0::3], dtype=np.uint8)
+                    padded_data[1::4] = np.frombuffer(raw_data[1::3], dtype=np.uint8)
+                    padded_data[2::4] = np.frombuffer(raw_data[2::3], dtype=np.uint8)
+                    
+                    # Sign extension: If the highest bit of the 3rd byte is 1, fill the 4th byte with 255
+                    padded_data[3::4] = (padded_data[2::4] > 127) * 255
+                    
+                    audio_data = padded_data.view(np.int32)
                 else:
-                    audio_data = np.zeros(int(self.RATE * self.CHUNK_DURATION), dtype=np.int16)
+                    audio_data = np.zeros(int(self.RATE * self.CHUNK_DURATION), dtype=np.int32)
             else:
                 # Mock fallback if ALSA fails or tested on windows
                 time.sleep(self.CHUNK_DURATION)

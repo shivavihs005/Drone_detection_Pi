@@ -62,6 +62,9 @@ class CameraModule:
                 # Picamera2 capture
                 try:
                     frame = self.picam2.capture_array()
+                    # YOLO expects 3 channels. Picamera2 may return 4 channels (e.g. RGBA/XBGR8888).
+                    if len(frame.shape) == 3 and frame.shape[2] == 4:
+                        frame = np.ascontiguousarray(frame[:, :, :3])
                 except Exception as e:
                     print(f"[CAMERA] Capture error: {e}")
                     time.sleep(0.1)
