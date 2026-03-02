@@ -1,0 +1,7 @@
+path: datasets/drone
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: drone

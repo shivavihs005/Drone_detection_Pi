@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -18,24 +19,26 @@
         }
     </script>
 </head>
+
 <body class="bg-darkBg text-slate-300 font-sans min-h-screen p-6">
 
     <div class="max-w-6xl mx-auto space-y-6">
-        
+
         <!-- Header -->
         <header class="flex items-center justify-between border-b border-slate-700 pb-4">
             <div>
                 <h1 class="text-3xl font-bold text-white tracking-wide">MULTIMODAL DRONE DETECTION</h1>
                 <p class="text-slate-400 mt-1">Raspberry Pi 5 Edge Node</p>
             </div>
-            <div id="status-indicator" class="px-6 py-2 rounded-full border-2 border-slate-600 text-slate-400 font-bold uppercase tracking-widest text-lg transition-all duration-300">
+            <div id="status-indicator"
+                class="px-6 py-2 rounded-full border-2 border-slate-600 text-slate-400 font-bold uppercase tracking-widest text-lg transition-all duration-300">
                 Monitoring
             </div>
         </header>
 
         <!-- Main Content -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
+
             <!-- Video Feed Column -->
             <div class="lg:col-span-2 bg-cardBg rounded-xl p-4 shadow-xl border border-slate-700/50">
                 <div class="flex justify-between items-center mb-4">
@@ -45,35 +48,60 @@
                     </h2>
                     <span class="text-xs font-mono text-slate-500">cam: plughw:0,0 | /dev/video0</span>
                 </div>
-                <div class="aspect-video bg-black rounded-lg overflow-hidden border border-slate-800 relative shadow-inner">
+                <div
+                    class="aspect-video bg-black rounded-lg overflow-hidden border border-slate-800 relative shadow-inner">
                     <img src="/video_feed" alt="Live Stream" class="w-full h-full object-cover">
                 </div>
             </div>
 
             <!-- Metrics Column -->
             <div class="bg-cardBg rounded-xl p-6 shadow-xl border border-slate-700/50 flex flex-col gap-6">
-                
+
                 <h2 class="text-xl font-semibold text-white border-b border-slate-700 pb-2">Sensor Telemetry</h2>
 
+                <div class="flex items-center justify-between mb-6 pb-4 border-b border-slate-700/50">
+                    <span class="text-sm font-medium text-slate-300">Vision Module</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="toggle-vision" class="sr-only peer" checked
+                            onchange="toggleSensor('vision', this.checked)">
+                        <div
+                            class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500">
+                        </div>
+                    </label>
+                </div>
+
+                <div class="flex items-center justify-between mb-8 pb-4 border-b border-slate-700/50">
+                    <span class="text-sm font-medium text-slate-300">Audio Module</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="toggle-audio" class="sr-only peer" checked
+                            onchange="toggleSensor('audio', this.checked)">
+                        <div
+                            class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500">
+                        </div>
+                    </label>
+                </div>
+
                 <!-- Vision Confidence Gauge -->
-                <div>
+                <div id="vis-container" class="transition-opacity duration-300">
                     <div class="flex justify-between mb-1">
                         <span class="text-sm font-medium text-slate-300 uppercase tracking-wider">Vision Model</span>
                         <span id="vis-val" class="text-sm font-mono text-blue-400">0.0%</span>
                     </div>
                     <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
-                        <div id="vis-bar" class="bg-blue-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                        <div id="vis-bar" class="bg-blue-500 h-2.5 rounded-full transition-all duration-300"
+                            style="width: 0%"></div>
                     </div>
                 </div>
 
                 <!-- Audio Confidence Gauge -->
-                <div>
+                <div id="aud-container" class="transition-opacity duration-300">
                     <div class="flex justify-between mb-1">
                         <span class="text-sm font-medium text-slate-300 uppercase tracking-wider">Audio Acoustic</span>
                         <span id="aud-val" class="text-sm font-mono text-emerald-400">0.0%</span>
                     </div>
                     <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
-                        <div id="aud-bar" class="bg-emerald-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                        <div id="aud-bar" class="bg-emerald-500 h-2.5 rounded-full transition-all duration-300"
+                            style="width: 0%"></div>
                     </div>
                     <div class="mt-1 text-right">
                         <span id="freq-val" class="text-xs font-mono text-slate-500">Peak: 0 Hz</span>
@@ -88,13 +116,17 @@
                         <span class="text-base font-bold text-white uppercase tracking-wider">FUSION CONFIDENCE</span>
                         <span id="fus-val" class="text-lg font-mono font-bold text-indigo-400">0.0%</span>
                     </div>
-                    <div class="w-full bg-slate-900 rounded-full h-4 overflow-hidden shadow-inner border border-slate-700">
-                        <div id="fus-bar" class="bg-gradient-to-r from-indigo-600 to-purple-500 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    <div
+                        class="w-full bg-slate-900 rounded-full h-4 overflow-hidden shadow-inner border border-slate-700">
+                        <div id="fus-bar"
+                            class="bg-gradient-to-r from-indigo-600 to-purple-500 h-4 rounded-full transition-all duration-300"
+                            style="width: 0%"></div>
                     </div>
                 </div>
 
                 <div class="mt-auto pt-8">
-                     <p class="text-xs text-slate-500 text-center font-mono">Running local models. Weighting: 60% Vis / 40% Aud</p>
+                    <p class="text-xs text-slate-500 text-center font-mono">Running local models. Weighting: 60% Vis /
+                        40% Aud</p>
                 </div>
 
             </div>
@@ -102,10 +134,33 @@
     </div>
 
     <script>
+        function toggleSensor(sensorType, isEnabled) {
+            const payload = {};
+            if (sensorType === 'vision') payload.vision_enabled = isEnabled;
+            if (sensorType === 'audio') payload.audio_enabled = isEnabled;
+
+            fetch('/api/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(res => res.json())
+                .catch(err => console.error("Error toggling sensor:", err));
+        }
+
         function updateMetrics() {
             fetch('/metrics')
                 .then(response => response.json())
                 .then(data => {
+                    // Gray out containers if disabled
+                    const visContainer = document.getElementById('vis-container');
+                    const audContainer = document.getElementById('aud-container');
+
+                    if (data.vision_enabled) visContainer.classList.remove('opacity-30');
+                    else visContainer.classList.add('opacity-30');
+
+                    if (data.audio_enabled) audContainer.classList.remove('opacity-30');
+                    else audContainer.classList.add('opacity-30');
+
                     // Update numeric values
                     document.getElementById('vis-val').innerText = (data.vision_confidence * 100).toFixed(1) + '%';
                     document.getElementById('aud-val').innerText = (data.audio_confidence * 100).toFixed(1) + '%';
@@ -134,4 +189,5 @@
         setInterval(updateMetrics, 100);
     </script>
 </body>
+
 </html>

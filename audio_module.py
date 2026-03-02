@@ -11,6 +11,7 @@ class AudioModule:
         self._current_confidence = 0.0
         self._dominant_freq = 0
         self._lock = threading.Lock()
+        self.audio_enabled = True
         
         self.RATE = 48000
         self.CHUNK_DURATION = 1.0
@@ -28,17 +29,35 @@ class AudioModule:
         if self._thread:
             self._thread.join(timeout=2)
 
-    def butter_bandpass(self, lowcut, highcut, fs, order=5):
-        nyq = 0.5 * fs
-        low = lowcut / nyq
-        high = highcut / nyq
-        b, a = butter(order, [low, high], btype='band')
-        return b, a
+    def audio_drone_score(self, chunk: np.ndarray, sample_rate: int) -> tuple[float, int]:
+        """Calculate drone likelihood score from audio chunk (Ported from drone_detection.py)."""
+        if chunk.size == 0:
+            return 0.0, 0
 
-    def butter_bandpass_filter(self, data, lowcut, highcut, fs, order=5):
-        b, a = self.butter_bandpass(lowcut, highcut, fs, order=order)
-        y = lfilter(b, a, data)
-        return y
+        signal = chunk.astype(np.float32)
+        signal = signal - np.mean(signal)
+        rms = float(np.sqrt(np.mean(signal**2)))
+
+        if rms < 0.001:
+            return 0.0, 0
+
+        window = np.hanning(signal.shape[0]).astype(np.float32)
+        spectrum = np.fft.rfft(signal * window)
+        freqs = np.fft.rfftfreq(signal.shape[0], d=1.0 / sample_rate)
+        power = np.abs(spectrum) ** 2
+
+        if power.size == 0:
+            return 0.0, 0
+            
+        peak_idx = np.argmax(power)
+        peak_freq = int(freqs[peak_idx])
+
+        total_power = float(np.sum(power)) + 1e-8
+        drone_band = (freqs >= 100) & (freqs <= 1200)
+        drone_band_energy = float(np.sum(power[drone_band])) / total_power
+
+        score = 0.6 * drone_band_energy + 0.4 * min(rms / 0.05, 1.0)
+        return float(np.clip(score, 0.0, 1.0)), peak_freq
 
     def _capture_loop(self):
         print("[AUDIO] Starting ALSA capture from plughw:1,0...")
@@ -62,16 +81,11 @@ class AudioModule:
                 raw_data = process.stdout.read(self.CHUNK_BYTES)
                 if len(raw_data) == self.CHUNK_BYTES:
                     # Convert 3-byte 24-bit PCM (S24_3LE) to 32-bit integers using numpy
-                    # We can do this by allocating a 4-byte buffer, filling the lowest 3 bytes with data
-                    # and sign-extending the 4th byte. A simpler way in python is to reshape and pad.
                     padded_data = np.zeros(len(raw_data) // 3 * 4, dtype=np.uint8)
                     padded_data[0::4] = np.frombuffer(raw_data[0::3], dtype=np.uint8)
                     padded_data[1::4] = np.frombuffer(raw_data[1::3], dtype=np.uint8)
                     padded_data[2::4] = np.frombuffer(raw_data[2::3], dtype=np.uint8)
-                    
-                    # Sign extension: If the highest bit of the 3rd byte is 1, fill the 4th byte with 255
                     padded_data[3::4] = (padded_data[2::4] > 127) * 255
-                    
                     audio_data = padded_data.view(np.int32)
                 else:
                     audio_data = np.zeros(int(self.RATE * self.CHUNK_DURATION), dtype=np.int32)
@@ -80,54 +94,23 @@ class AudioModule:
                 time.sleep(self.CHUNK_DURATION)
                 audio_data = np.random.normal(0, 100, int(self.RATE * self.CHUNK_DURATION))
 
+            # Skip DSP Processing if the module is turned OFF
+            if not self.audio_enabled:
+                with self._lock:
+                    self._current_confidence = 0.0
+                    self._dominant_freq = 0
+                continue
+
             try:
-                # 1. Bandpass filter 80 Hz to 4000 Hz
-                filtered_data = self.butter_bandpass_filter(audio_data, 80, 4000, self.RATE, order=3)
-                
-                # 2. Compute FFT
-                fft_result = np.fft.rfft(filtered_data)
-                fft_freqs = np.fft.rfftfreq(len(filtered_data), 1.0/self.RATE)
-                magnitudes = np.abs(fft_result)
-                
-                # 3. Find dominant freq
-                peak_idx = np.argmax(magnitudes)
-                peak_freq = fft_freqs[peak_idx]
-                peak_mag = magnitudes[peak_idx]
-                
-                confidence = 0.0
-                
-                # 4. Check if peak is between 100-600 Hz
-                if 100 <= peak_freq <= 600:
-                    mean_mag = np.mean(magnitudes)
-                    
-                    # Normalize peak relative to noise floor
-                    peak_ratio = peak_mag / (mean_mag + 1e-6)
-                    
-                    if peak_ratio > 5.0:  # strong narrowband tone
-                        confidence = 0.4
-                        
-                        # Note: Simple explicit checks for harmonics
-                        h2_target = peak_freq * 2
-                        h3_target = peak_freq * 3
-                        
-                        h2_idx = np.argmin(np.abs(fft_freqs - h2_target))
-                        h3_idx = np.argmin(np.abs(fft_freqs - h3_target))
-                        
-                        if magnitudes[h2_idx] > mean_mag * 2:
-                            confidence += 0.3
-                        if magnitudes[h3_idx] > mean_mag * 2:
-                            confidence += 0.3
-                            
-                # Clamp to 1.0
-                confidence = min(max(confidence, 0.0), 1.0)
-                
+                confidence, peak_freq = self.audio_drone_score(audio_data, self.RATE)
             except Exception as e:
                 print(f"[AUDIO] DSP Error: {e}")
-                peak_freq = 0.0
+                peak_freq = 0
                 confidence = 0.0
 
             with self._lock:
-                self._current_confidence = confidence
+                # Smooth the audio scores to prevent jittering UI
+                self._current_confidence = 0.7 * self._current_confidence + 0.3 * confidence
                 self._dominant_freq = int(peak_freq)
 
         if process:
@@ -137,5 +120,6 @@ class AudioModule:
         with self._lock:
             return {
                 "dominant_freq": self._dominant_freq,
-                "confidence": self._current_confidence
+                "confidence": self._current_confidence,
+                "audio_enabled": self.audio_enabled
             }

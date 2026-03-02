@@ -12,7 +12,11 @@ class CameraModule:
         self._current_frame = None
         self._current_confidence = 0.0
         self._lock = threading.Lock()
+        self.vision_enabled = True
         
+        # Proxy labels from drone-detection-main since we use yolov8n.pt out of the box
+        self.proxy_labels = {"airplane", "helicopter", "bird"}
+
         # Load YOLO model
         print("[CAMERA] Loading YOLO model...")
         
@@ -75,25 +79,36 @@ class CameraModule:
                     time.sleep(0.1)
                     continue
 
-            # Run YOLO inference
-            results = self.model(frame, verbose=False)
-            
             highest_conf = 0.0
             best_box = None
-            
-            for r in results:
-                for box in r.boxes:
+            label_text = ""
+
+            if self.vision_enabled:
+                # Run YOLO inference
+                results = self.model(frame, verbose=False)
+                result = results[0]
+                names = result.names
+                
+                for box in result.boxes:
+                    cls_idx = int(box.cls[0].item())
+                    label = names.get(cls_idx, str(cls_idx)).lower()
+                    
+                    if label not in self.proxy_labels:
+                        continue # Skip people, cars, chairs, etc.
+                        
                     conf = float(box.conf[0])
                     if conf > highest_conf:
                         highest_conf = conf
                         best_box = list(map(int, box.xyxy[0]))
+                        label_text = f"possible_drone({label}): {highest_conf:.2f}"
 
-            # Draw bounding box
-            if best_box:
+            # Draw bounding box if we found something
+            if best_box and self.vision_enabled:
                 x1, y1, x2, y2 = best_box
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
-                label = f"DRONE: {highest_conf:.2f}"
-                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                cv2.putText(frame, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            elif not self.vision_enabled:
+                cv2.putText(frame, "VISION SENSOR DISABLED", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (100, 100, 100), 2)
 
             # Encode frame
             ret, buffer = cv2.imencode('.jpg', frame)
@@ -111,5 +126,6 @@ class CameraModule:
         with self._lock:
             return {
                 "frame": self._current_frame,
-                "confidence": self._current_confidence
+                "confidence": self._current_confidence,
+                "vision_enabled": self.vision_enabled
             }

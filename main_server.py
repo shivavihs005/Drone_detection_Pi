@@ -1,4 +1,4 @@
-from flask import Flask, Response, render_template, jsonify
+from flask import Flask, Response, render_template, jsonify, request
 import time
 import signal
 import sys
@@ -69,6 +69,17 @@ def metrics():
         "dominant_freq": dom_freq,
         "is_detected": drone_detected
     })
+
+@app.route('/api/toggle', methods=['POST'])
+def toggle_sensor():
+    data = request.json
+    if "vision_enabled" in data:
+        camera.vision_enabled = data["vision_enabled"]
+        print(f"[SYSTEM] Vision Sensor Enabled: {camera.vision_enabled}")
+    if "audio_enabled" in data:
+        audio.audio_enabled = data["audio_enabled"]
+        print(f"[SYSTEM] Audio Sensor Enabled: {audio.audio_enabled}")
+    return jsonify({"status": "success"})
 
 if __name__ == '__main__':
     init_system()
