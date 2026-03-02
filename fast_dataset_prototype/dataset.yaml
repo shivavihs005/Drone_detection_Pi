@@ -1,0 +1,7 @@
+
+path: 'D:\Drone_Detection\Drone_detection_Pi\fast_dataset_prototype'
+train: 'images/train'
+val: 'images/train' # Use same for validation to avoid crashing
+
+names:
+  0: drone

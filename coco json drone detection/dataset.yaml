@@ -1,0 +1,8 @@
+
+path: 'D:\Drone_Detection\Drone_detection_Pi\coco json drone detection'
+train: 'train'
+val: 'valid'
+test: 'test'
+
+names:
+  0: drone
