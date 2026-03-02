@@ -29,7 +29,7 @@ class CameraModule:
             from picamera2 import Picamera2
             print("[CAMERA] Initializing Picamera2...")
             self.picam2 = Picamera2()
-            config = self.picam2.create_video_configuration({"main": {"size": (1280, 720)}})
+            config = self.picam2.create_video_configuration({"size": (1280, 720)})
             self.picam2.configure(config)
             self.picam2.start()
             self.use_picam = True
