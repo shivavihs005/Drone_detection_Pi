@@ -3,3 +3,4 @@ numpy
 scipy
 ultralytics
 opencv-python
+sounddevice

@@ -14,9 +14,10 @@ class CameraModule:
         self._lock = threading.Lock()
         self.vision_enabled = True
         
-        # Proxy labels from drone-detection-main since we use yolov8n.pt out of the box
-        # Updated to use custom object 'drone'
-        self.proxy_labels = {"drone"}
+        # Proxy labels: 'drone' for our custom model.
+        # When falling back to base YOLOv8n (COCO), also watch for 'bird' / 'airplane'
+        # as rough stand-ins so the video feed is still annotated.
+        self.proxy_labels = {"drone", "bird", "airplane"}
 
         # Load YOLO model
         print("[CAMERA] Loading YOLO model...")
@@ -24,11 +25,24 @@ class CameraModule:
         # YOLOv8n automatically downloads to the current dir if not present
         if not os.path.exists('models'):
             os.makedirs('models')
-            
-        # Point to our new custom fast prototype model
-        model_path = 'runs/detect/train4/weights/best.pt'
-        if not os.path.exists(model_path):
-            print(f"[CAMERA] WARNING: Custom model {model_path} not found. Ensure training finished successfully.")
+
+        # --- Model path resolution (3-tier fallback) ---
+        # 1. Best custom-trained model from training run
+        # 2. Pre-downloaded YOLOv8n inside models/
+        # 3. Root-level yolov8n.pt (auto-downloaded by ultralytics if missing)
+        custom_model  = 'runs/detect/train4/weights/best.pt'
+        fallback1     = 'models/yolov8n.pt'
+        fallback2     = 'yolov8n.pt'
+
+        if os.path.exists(custom_model):
+            model_path = custom_model
+            print(f"[CAMERA] Using custom-trained model: {model_path}")
+        elif os.path.exists(fallback1):
+            model_path = fallback1
+            print(f"[CAMERA] Custom model not found. Using fallback: {model_path}")
+        else:
+            model_path = fallback2   # ultralytics will auto-download if absent
+            print(f"[CAMERA] Using base YOLOv8n model: {model_path} (will auto-download if needed)")
 
         self.model = YOLO(model_path)
         
