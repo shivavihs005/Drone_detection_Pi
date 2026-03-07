@@ -7,7 +7,7 @@ import os
 try:
     import sounddevice as sd
     SOUNDDEVICE_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     SOUNDDEVICE_AVAILABLE = False
 
 # Try to load ML libraries for trained model inference

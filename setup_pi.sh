@@ -117,7 +117,11 @@ python3 -m pip install --upgrade pip
 
 # Install safe dependencies used by server/audio path
 echo ">>> Installing safe Python packages..."
-pip install Flask sounddevice requests librosa joblib scikit-learn pyyaml pillow tqdm psutil py-cpuinfo matplotlib pandas seaborn
+pip install Flask requests librosa joblib pyyaml pillow tqdm psutil matplotlib
+
+# Optional dependencies (do not fail setup if unavailable for this Pi/Python build)
+pip install sounddevice 2>/dev/null || echo ">>> Optional: sounddevice install failed (arecord backend will be used)."
+pip install scikit-learn 2>/dev/null || echo ">>> Optional: scikit-learn install failed (DSP fallback will be used for audio)."
 
 # Remove known problematic wheels if already installed
 echo ">>> Purging x86-compiled packages that crash on ARM..."
@@ -138,12 +142,21 @@ pip uninstall -y scipy 2>/dev/null || true
 echo ">>> Verifying all imports work on this ARM CPU..."
 IMPORT_OK=true
 
-for mod in numpy cv2 scipy flask sounddevice requests librosa joblib sklearn; do
+for mod in numpy cv2 flask requests librosa joblib; do
     if python3 -c "import $mod; print('[OK] $mod')" 2>/dev/null; then
         :
     else
         echo "[FAIL] $mod crashed or not found!"
         IMPORT_OK=false
+    fi
+done
+
+# Optional imports: report only
+for mod in scipy sounddevice sklearn; do
+    if python3 -c "import $mod; print('[OK] $mod (optional)')" 2>/dev/null; then
+        :
+    else
+        echo "[WARN] $mod unavailable (optional)."
     fi
 done
 
@@ -153,7 +166,7 @@ from camera_module import CameraModule
 from audio_module import AudioModule
 from fusion_module import FusionModule
 print('[OK] All server modules import successfully')
-" 2>/dev/null; then
+"; then
     :
 else
     echo "[FAIL] Server module import crashed!"
