@@ -46,12 +46,52 @@ class CameraModule:
         
         # Use USB webcam via OpenCV
         print("[CAMERA] Initializing USB webcam via OpenCV...")
-        self.cap = cv2.VideoCapture(0)
-        if not self.cap.isOpened():
-            raise RuntimeError("[CAMERA] Could not open USB webcam at index 0. Check connection.")
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        self.cap = self._open_camera()
+        if self.cap is None:
+            raise RuntimeError("[CAMERA] Could not open USB webcam. Check connection and /dev/video*.")
         print("[CAMERA] USB webcam started.")
+
+    def _open_camera(self):
+        # Prefer V4L2 backend on Raspberry Pi to avoid GStreamer pipeline issues.
+        device_paths = ["/dev/video0", "/dev/video1"]
+        for path in device_paths:
+            if os.path.exists(path):
+                cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+                if cap is not None and cap.isOpened():
+                    # USB UVC cams on Pi are often more stable with MJPG.
+                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                    cap.set(cv2.CAP_PROP_FPS, 30)
+
+                    # Accept only if the device returns an actual frame.
+                    ok, _ = cap.read()
+                    if ok:
+                        print(f"[CAMERA] Opened camera device {path} (V4L2).")
+                        return cap
+                    cap.release()
+
+        candidates = [
+            (0, cv2.CAP_V4L2),
+            (1, cv2.CAP_V4L2),
+            (0, cv2.CAP_ANY),
+            (1, cv2.CAP_ANY),
+        ]
+        for idx, backend in candidates:
+            cap = cv2.VideoCapture(idx, backend)
+            if cap is not None and cap.isOpened():
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                cap.set(cv2.CAP_PROP_FPS, 30)
+                ok, _ = cap.read()
+                if ok:
+                    print(f"[CAMERA] Opened camera index {idx} backend {backend}.")
+                    return cap
+                cap.release()
+            if cap is not None:
+                cap.release()
+        return None
 
     def _resolve_model_path(self, requested_path):
         candidates = [
@@ -163,11 +203,34 @@ class CameraModule:
 
     def _capture_loop(self):
         # We target ~15 FPS. Inference usually takes some time, so loop delay can be minimal.
+        failed_reads = 0
         while self._running:
             ret, frame = self.cap.read()
             if not ret:
+                failed_reads += 1
+                if failed_reads % 30 == 0:
+                    print("[CAMERA] Frame read failed. Attempting camera reconnect...")
+                    try:
+                        self.cap.release()
+                    except Exception:
+                        pass
+                    self.cap = self._open_camera() or self.cap
+
+                # Keep UI alive with a placeholder frame when camera read fails.
+                placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(placeholder, "CAMERA READ FAILED", (120, 220), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                            (0, 0, 255), 2)
+                cv2.putText(placeholder, "Check USB webcam /dev/video0", (95, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                            (200, 200, 200), 1)
+                ok, buffer = cv2.imencode('.jpg', placeholder)
+                if ok:
+                    with self._lock:
+                        self._current_frame = buffer.tobytes()
+                        self._current_confidence = 0.0
+                        self._vision_detected = False
                 time.sleep(0.1)
                 continue
+            failed_reads = 0
 
             highest_conf = 0.0
             best_box = None

@@ -21,6 +21,7 @@ except ImportError:
 # Fall back to subprocess arecord only on Linux / Raspberry Pi
 import subprocess
 import platform
+import re
 
 
 class AudioModule:
@@ -214,22 +215,26 @@ class AudioModule:
                 ["arecord", "-l"],
                 capture_output=True, text=True, timeout=5
             )
-            # Parse output for card/device numbers
-            # Example line: "card 1: sndrpisimplecar [snd_rpi_simple_card], device 0: simple-card_codec_link ..."
+            # Parse output for card/device numbers.
+            # Example line: "card 1: sndrpisimplecar [...], device 0: ..."
+            candidates = []
             for line in result.stdout.splitlines():
-                line_lower = line.lower()
-                if "card" in line_lower and "device" in line_lower:
-                    # Extract card and device number
-                    parts = line.split(":")
-                    card_part = parts[0].strip()  # "card 1"
-                    card_num = card_part.split()[-1]
-                    # Find device number
-                    for part in parts:
-                        if "device" in part.lower():
-                            dev_num = part.strip().split()[1].rstrip(",")
-                            device = f"plughw:{card_num},{dev_num}"
-                            print(f"[AUDIO] Found ALSA capture device: {device} ({line.strip()})")
-                            return device
+                match = re.search(r"card\s+(\d+):.*device\s+(\d+):", line, re.IGNORECASE)
+                if not match:
+                    continue
+                card_num, dev_num = match.group(1), match.group(2)
+                device = f"plughw:{card_num},{dev_num}"
+                lower = line.lower()
+                # Prefer I2S/non-USB devices first.
+                if "usb" not in lower and "hd camera" not in lower:
+                    print(f"[AUDIO] Found ALSA capture device: {device} ({line.strip()})")
+                    return device
+                candidates.append((device, line.strip()))
+
+            if candidates:
+                device, raw = candidates[0]
+                print(f"[AUDIO] Using fallback ALSA capture device: {device} ({raw})")
+                return device
         except Exception as e:
             print(f"[AUDIO] Could not auto-detect ALSA device: {e}")
         # Default fallback
