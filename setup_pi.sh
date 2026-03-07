@@ -109,56 +109,36 @@ fi
 echo ">>> Activating virtual environment..."
 source $ENV_DIR/bin/activate
 
-# 8. Install required Python packages
-# On Pi ARM, opencv/numpy/scipy come from apt (system packages).
-# The venv uses --system-site-packages so they're already available.
-# PyPI x86 wheels cause "Illegal instruction" on ARM, so we must:
-#   1. Install ultralytics WITHOUT deps
-#   2. Manually install safe deps
-#   3. Nuke ALL pip-installed ARM-incompatible packages
-#   4. Verify every import individually
+# 8. Install required Python packages (Pi-safe only)
+# IMPORTANT: Do not install ultralytics/torch on Pi 4B + Python 3.13,
+# it can pull incompatible wheels and cause "Illegal instruction".
 echo ">>> Installing Python dependencies..."
 python3 -m pip install --upgrade pip
 
-# Step A: Install ultralytics WITHOUT letting it pull in x86 torch/opencv/numpy
-echo ">>> Installing ultralytics (no-deps to prevent x86 packages)..."
-pip install --no-deps ultralytics
-
-# Step B: Install pure-python / safe dependencies
+# Install safe dependencies used by server/audio path
 echo ">>> Installing safe Python packages..."
 pip install Flask sounddevice requests librosa joblib scikit-learn pyyaml pillow tqdm psutil py-cpuinfo matplotlib pandas seaborn
 
-# Step C: Forcefully remove ALL pip-installed packages that crash on ARM
+# Remove known problematic wheels if already installed
 echo ">>> Purging x86-compiled packages that crash on ARM..."
 pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python 2>/dev/null || true
 pip uninstall -y numpy 2>/dev/null || true
 pip uninstall -y scipy 2>/dev/null || true
+pip uninstall -y ultralytics 2>/dev/null || true
 pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
 
-# Step D: Install PyTorch for ARM (aarch64) from PyTorch's official CPU index
-echo ">>> Installing PyTorch for ARM..."
-ARCH=$(uname -m)
-if [ "$ARCH" = "aarch64" ]; then
-    # PyTorch official CPU wheels include aarch64 builds
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-    # If that installed x86 numpy, remove it again
-    python3 -c "import numpy" 2>/dev/null || pip uninstall -y numpy 2>/dev/null || true
-else
-    pip install torch torchvision
-fi
-
-# Step E: Make sure numpy/opencv/scipy come from APT, not pip
+# Ensure numpy/opencv/scipy come from apt, not pip
 # The venv was created with --system-site-packages, so apt packages are visible
 echo ">>> Ensuring system (apt) packages are used for numpy/opencv/scipy..."
 pip uninstall -y numpy 2>/dev/null || true
 pip uninstall -y opencv-python opencv-python-headless 2>/dev/null || true
 pip uninstall -y scipy 2>/dev/null || true
 
-# Step F: Verify EVERY import that main_server.py needs
+# Verify imports needed by server on Pi
 echo ">>> Verifying all imports work on this ARM CPU..."
 IMPORT_OK=true
 
-for mod in numpy cv2 scipy torch torchvision flask sounddevice requests; do
+for mod in numpy cv2 scipy flask sounddevice requests librosa joblib sklearn; do
     if python3 -c "import $mod; print('[OK] $mod')" 2>/dev/null; then
         :
     else
@@ -166,14 +146,6 @@ for mod in numpy cv2 scipy torch torchvision flask sounddevice requests; do
         IMPORT_OK=false
     fi
 done
-
-# Test ultralytics + YOLO specifically (this loads torch internally)
-if python3 -c "from ultralytics import YOLO; print('[OK] ultralytics YOLO')" 2>/dev/null; then
-    :
-else
-    echo "[FAIL] ultralytics YOLO import crashed!"
-    IMPORT_OK=false
-fi
 
 # Test the actual server imports
 if python3 -c "
@@ -195,10 +167,9 @@ if [ "$IMPORT_OK" = false ]; then
     echo "=========================================="
     echo " Some packages are not ARM-compatible."
     echo " Check the [FAIL] messages above."
-    echo " You may need to install torch from source:"
-    echo "   pip install torch --extra-index-url https://www.piwheels.org/simple"
     echo "=========================================="
-    echo " Attempting to start server anyway..."
+    echo " Fix the package errors before starting server."
+    exit 1
 fi
 
 # 9. Create required directories
