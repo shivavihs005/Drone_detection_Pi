@@ -112,15 +112,94 @@ source $ENV_DIR/bin/activate
 # 8. Install required Python packages
 # On Pi ARM, opencv/numpy/scipy come from apt (system packages).
 # The venv uses --system-site-packages so they're already available.
-# We only pip-install packages NOT available via apt.
+# PyPI x86 wheels cause "Illegal instruction" on ARM, so we must:
+#   1. Install ultralytics WITHOUT deps
+#   2. Manually install safe deps
+#   3. Nuke ALL pip-installed ARM-incompatible packages
+#   4. Verify every import individually
 echo ">>> Installing Python dependencies..."
 python3 -m pip install --upgrade pip
 
-# Remove any pip-installed opencv/numpy that cause "Illegal instruction" on ARM
-pip uninstall -y opencv-python opencv-python-headless numpy 2>/dev/null || true
+# Step A: Install ultralytics WITHOUT letting it pull in x86 torch/opencv/numpy
+echo ">>> Installing ultralytics (no-deps to prevent x86 packages)..."
+pip install --no-deps ultralytics
 
-# Install remaining packages (skip opencv-python and numpy, they come from apt)
-pip install Flask ultralytics sounddevice requests librosa joblib scikit-learn
+# Step B: Install pure-python / safe dependencies
+echo ">>> Installing safe Python packages..."
+pip install Flask sounddevice requests librosa joblib scikit-learn pyyaml pillow tqdm psutil py-cpuinfo matplotlib pandas seaborn
+
+# Step C: Forcefully remove ALL pip-installed packages that crash on ARM
+echo ">>> Purging x86-compiled packages that crash on ARM..."
+pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python 2>/dev/null || true
+pip uninstall -y numpy 2>/dev/null || true
+pip uninstall -y scipy 2>/dev/null || true
+pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
+
+# Step D: Install PyTorch for ARM (aarch64) from PyTorch's official CPU index
+echo ">>> Installing PyTorch for ARM..."
+ARCH=$(uname -m)
+if [ "$ARCH" = "aarch64" ]; then
+    # PyTorch official CPU wheels include aarch64 builds
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+    # If that installed x86 numpy, remove it again
+    python3 -c "import numpy" 2>/dev/null || pip uninstall -y numpy 2>/dev/null || true
+else
+    pip install torch torchvision
+fi
+
+# Step E: Make sure numpy/opencv/scipy come from APT, not pip
+# The venv was created with --system-site-packages, so apt packages are visible
+echo ">>> Ensuring system (apt) packages are used for numpy/opencv/scipy..."
+pip uninstall -y numpy 2>/dev/null || true
+pip uninstall -y opencv-python opencv-python-headless 2>/dev/null || true
+pip uninstall -y scipy 2>/dev/null || true
+
+# Step F: Verify EVERY import that main_server.py needs
+echo ">>> Verifying all imports work on this ARM CPU..."
+IMPORT_OK=true
+
+for mod in numpy cv2 scipy torch torchvision flask sounddevice requests; do
+    if python3 -c "import $mod; print('[OK] $mod')" 2>/dev/null; then
+        :
+    else
+        echo "[FAIL] $mod crashed or not found!"
+        IMPORT_OK=false
+    fi
+done
+
+# Test ultralytics + YOLO specifically (this loads torch internally)
+if python3 -c "from ultralytics import YOLO; print('[OK] ultralytics YOLO')" 2>/dev/null; then
+    :
+else
+    echo "[FAIL] ultralytics YOLO import crashed!"
+    IMPORT_OK=false
+fi
+
+# Test the actual server imports
+if python3 -c "
+from camera_module import CameraModule
+from audio_module import AudioModule
+from fusion_module import FusionModule
+print('[OK] All server modules import successfully')
+" 2>/dev/null; then
+    :
+else
+    echo "[FAIL] Server module import crashed!"
+    IMPORT_OK=false
+fi
+
+if [ "$IMPORT_OK" = false ]; then
+    echo ""
+    echo "=========================================="
+    echo " IMPORT ERRORS DETECTED"
+    echo "=========================================="
+    echo " Some packages are not ARM-compatible."
+    echo " Check the [FAIL] messages above."
+    echo " You may need to install torch from source:"
+    echo "   pip install torch --extra-index-url https://www.piwheels.org/simple"
+    echo "=========================================="
+    echo " Attempting to start server anyway..."
+fi
 
 # 9. Create required directories
 echo ">>> Creating required directories..."
