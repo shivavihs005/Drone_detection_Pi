@@ -91,6 +91,12 @@
                         <div id="vis-bar" class="bg-blue-500 h-2.5 rounded-full transition-all duration-300"
                             style="width: 0%"></div>
                     </div>
+                    <div class="mt-2">
+                        <span id="vision-status"
+                            class="text-xs font-bold uppercase tracking-wider px-2 py-1 rounded text-slate-500 bg-slate-800">
+                            No Drone in View
+                        </span>
+                    </div>
                 </div>
 
                 <!-- Audio Confidence Gauge -->
@@ -103,7 +109,11 @@
                         <div id="aud-bar" class="bg-emerald-500 h-2.5 rounded-full transition-all duration-300"
                             style="width: 0%"></div>
                     </div>
-                    <div class="mt-1 text-right">
+                    <div class="mt-2 flex justify-between items-center">
+                        <span id="audio-status"
+                            class="text-xs font-bold uppercase tracking-wider px-2 py-1 rounded text-slate-500 bg-slate-800">
+                            No Drone Audio
+                        </span>
                         <span id="freq-val" class="text-xs font-mono text-slate-500">Peak: 0 Hz</span>
                     </div>
                 </div>
@@ -121,6 +131,25 @@
                         <div id="fus-bar"
                             class="bg-gradient-to-r from-indigo-600 to-purple-500 h-4 rounded-full transition-all duration-300"
                             style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Detection Summary -->
+                <div class="mt-4 bg-slate-900/60 rounded-lg p-4 border border-slate-700/50">
+                    <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-3 border-b border-slate-700 pb-2">Detection Summary</h3>
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs text-slate-400">Video (YOLO)</span>
+                            <span id="summary-vision" class="text-xs font-bold px-2 py-0.5 rounded text-slate-500 bg-slate-800">--</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs text-slate-400">Audio (ML/DSP)</span>
+                            <span id="summary-audio" class="text-xs font-bold px-2 py-0.5 rounded text-slate-500 bg-slate-800">--</span>
+                        </div>
+                        <div class="flex justify-between items-center border-t border-slate-700 pt-2 mt-2">
+                            <span class="text-xs font-bold text-white">Combined Result</span>
+                            <span id="summary-fusion" class="text-xs font-bold px-2 py-0.5 rounded text-slate-500 bg-slate-800">--</span>
+                        </div>
                     </div>
                 </div>
 
@@ -167,6 +196,55 @@
                     document.getElementById('fus-val').innerText = (data.fusion_confidence * 100).toFixed(1) + '%';
                     document.getElementById('freq-val').innerText = 'Peak: ' + data.dominant_freq + ' Hz';
 
+                    // Update audio detection status label
+                    const audioStatus = document.getElementById('audio-status');
+                    if (data.audio_detected) {
+                        audioStatus.innerText = 'DRONE AUDIO DETECTED';
+                        audioStatus.className = 'text-xs font-bold uppercase tracking-wider px-2 py-1 rounded text-red-400 bg-red-500/20 border border-red-500/50 animate-pulse';
+                    } else {
+                        audioStatus.innerText = 'No Drone Audio';
+                        audioStatus.className = 'text-xs font-bold uppercase tracking-wider px-2 py-1 rounded text-slate-500 bg-slate-800';
+                    }
+
+                    // Update vision detection status label
+                    const visionStatus = document.getElementById('vision-status');
+                    if (data.vision_detected) {
+                        visionStatus.innerText = 'DRONE IN VIEW';
+                        visionStatus.className = 'text-xs font-bold uppercase tracking-wider px-2 py-1 rounded text-red-400 bg-red-500/20 border border-red-500/50 animate-pulse';
+                    } else {
+                        visionStatus.innerText = 'No Drone in View';
+                        visionStatus.className = 'text-xs font-bold uppercase tracking-wider px-2 py-1 rounded text-slate-500 bg-slate-800';
+                    }
+
+                    // Update Detection Summary panel
+                    const summaryVision = document.getElementById('summary-vision');
+                    const summaryAudio = document.getElementById('summary-audio');
+                    const summaryFusion = document.getElementById('summary-fusion');
+
+                    if (data.vision_detected) {
+                        summaryVision.innerText = 'DETECTED';
+                        summaryVision.className = 'text-xs font-bold px-2 py-0.5 rounded text-red-400 bg-red-500/20';
+                    } else {
+                        summaryVision.innerText = 'CLEAR';
+                        summaryVision.className = 'text-xs font-bold px-2 py-0.5 rounded text-green-400 bg-green-500/20';
+                    }
+
+                    if (data.audio_detected) {
+                        summaryAudio.innerText = 'DETECTED';
+                        summaryAudio.className = 'text-xs font-bold px-2 py-0.5 rounded text-red-400 bg-red-500/20';
+                    } else {
+                        summaryAudio.innerText = 'CLEAR';
+                        summaryAudio.className = 'text-xs font-bold px-2 py-0.5 rounded text-green-400 bg-green-500/20';
+                    }
+
+                    if (data.is_detected) {
+                        summaryFusion.innerText = 'DRONE DETECTED';
+                        summaryFusion.className = 'text-xs font-bold px-2 py-0.5 rounded text-red-400 bg-red-500/20 animate-pulse';
+                    } else {
+                        summaryFusion.innerText = 'ALL CLEAR';
+                        summaryFusion.className = 'text-xs font-bold px-2 py-0.5 rounded text-green-400 bg-green-500/20';
+                    }
+
                     // Update bar widths
                     document.getElementById('vis-bar').style.width = (data.vision_confidence * 100) + '%';
                     document.getElementById('aud-bar').style.width = (data.audio_confidence * 100) + '%';
@@ -175,13 +253,11 @@
                     // Update Status Indicator
                     const statusIndicator = document.getElementById('status-indicator');
                     if (data.is_detected) {
-                        if (data.api_confirmed) {
-                            statusIndicator.innerText = 'API CONFIRMED DRONE';
-                            statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-red-500 bg-red-600 font-bold text-white uppercase tracking-widest text-lg transition-all duration-300 shadow-[0_0_20px_rgba(239,68,68,0.8)] animate-pulse';
-                        } else {
-                            statusIndicator.innerText = 'LOCAL DETECT (AWAITING API)';
-                            statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-orange-500 bg-orange-500/20 text-orange-500 font-bold uppercase tracking-widest text-lg transition-all duration-300 shadow-[0_0_15px_rgba(249,115,22,0.5)]';
-                        }
+                        statusIndicator.innerText = 'DRONE DETECTED';
+                        statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-red-500 bg-red-600 font-bold text-white uppercase tracking-widest text-lg transition-all duration-300 shadow-[0_0_20px_rgba(239,68,68,0.8)] animate-pulse';
+                    } else if (data.vision_detected || data.audio_detected) {
+                        statusIndicator.innerText = 'POSSIBLE DRONE';
+                        statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-orange-500 bg-orange-500/20 text-orange-500 font-bold uppercase tracking-widest text-lg transition-all duration-300 shadow-[0_0_15px_rgba(249,115,22,0.5)]';
                     } else {
                         statusIndicator.innerText = 'Monitoring';
                         statusIndicator.className = 'px-6 py-2 rounded-full border-2 border-slate-600 text-slate-400 font-bold uppercase tracking-widest text-lg transition-all duration-300';

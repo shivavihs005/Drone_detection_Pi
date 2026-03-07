@@ -4,3 +4,7 @@ scipy
 ultralytics
 opencv-python
 sounddevice
+requests
+librosa
+joblib
+scikit-learn

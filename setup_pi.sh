@@ -4,17 +4,35 @@ echo "=========================================="
 echo " Starting Drone Detection Pi Setup Script"
 echo "=========================================="
 
-# 1. Update system dependencies 
+# 1. Update system dependencies
 echo ">>> Checking/Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3-venv python3-pip alsa-utils libcamera-apps
+sudo apt-get install -y \
+    python3-venv \
+    python3-pip \
+    python3-dev \
+    alsa-utils \
+    libportaudio2 \
+    libsndfile1 \
+    v4l-utils \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    ffmpeg
 
-# 2. Update the repository from GitHub
+# 2. Verify USB webcam is detected
+echo ">>> Checking for USB webcam..."
+if v4l2-ctl --list-devices 2>/dev/null | grep -q "video"; then
+    echo ">>> USB webcam detected:"
+    v4l2-ctl --list-devices
+else
+    echo ">>> WARNING: No USB webcam detected. Please connect one before running the server."
+fi
+
+# 3. Update the repository from GitHub
 echo ">>> Pulling latest code from GitHub..."
 git pull origin main
 
-# 3. Create virtual environment 
-# Using --system-site-packages is crucial on Raspberry Pi to access picamera2
+# 4. Create virtual environment
 ENV_DIR="drone_env"
 if [ ! -d "$ENV_DIR" ]; then
     echo ">>> Creating virtual environment in $ENV_DIR..."
@@ -23,11 +41,11 @@ else
     echo ">>> Virtual environment already exists."
 fi
 
-# 4. Activate virtual environment
+# 5. Activate virtual environment
 echo ">>> Activating virtual environment..."
 source $ENV_DIR/bin/activate
 
-# 5. Install required Python packages
+# 6. Install required Python packages
 echo ">>> Installing Python dependencies..."
 python3 -m pip install --upgrade pip
 
@@ -35,9 +53,19 @@ if [ -f "requirements.txt" ]; then
     pip install -r requirements.txt
 else
     echo ">>> requirements.txt not found! Installing default packages..."
-    pip install Flask numpy scipy ultralytics opencv-python
+    pip install Flask numpy scipy ultralytics opencv-python sounddevice requests librosa joblib scikit-learn
 fi
 
-# 6. Run the main server
-echo ">>> Setup complete. Starting the Main Server..."
+# 7. Create required directories
+echo ">>> Creating required directories..."
+mkdir -p models
+mkdir -p templates
+
+# 8. Run the main server
+echo ""
+echo "=========================================="
+echo " Setup complete!"
+echo " Using USB webcam for detection."
+echo "=========================================="
+echo ">>> Starting the Main Server..."
 python3 main_server.py

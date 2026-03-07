@@ -1,7 +1,6 @@
 import threading
 import time
 import cv2
-import numpy as np
 import os
 from ultralytics import YOLO
 
@@ -11,8 +10,10 @@ class CameraModule:
         self._running = False
         self._current_frame = None
         self._current_confidence = 0.0
+        self._vision_detected = False
         self._lock = threading.Lock()
         self.vision_enabled = True
+        self.VISION_THRESHOLD = 0.4  # confidence threshold for vision-only drone detection
         
         # Proxy labels: 'drone' for our custom model.
         # When falling back to base YOLOv8n (COCO), also watch for 'bird' / 'airplane'
@@ -46,22 +47,14 @@ class CameraModule:
 
         self.model = YOLO(model_path)
         
-        # Try to initialize Picamera2
-        try:
-            from picamera2 import Picamera2
-            print("[CAMERA] Initializing Picamera2...")
-            self.picam2 = Picamera2()
-            config = self.picam2.create_video_configuration({"size": (1280, 720)})
-            self.picam2.configure(config)
-            self.picam2.start()
-            self.use_picam = True
-            print("[CAMERA] Picamera2 started.")
-        except ImportError:
-            print("[CAMERA] Picamera2 not found. Falling back to OpenCV video capture (for local testing).")
-            self.use_picam = False
-            self.cap = cv2.VideoCapture(0)
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        # Use USB webcam via OpenCV
+        print("[CAMERA] Initializing USB webcam via OpenCV...")
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            raise RuntimeError("[CAMERA] Could not open USB webcam at index 0. Check connection.")
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        print("[CAMERA] USB webcam started.")
 
     def start(self):
         self._running = True
@@ -72,30 +65,15 @@ class CameraModule:
         self._running = False
         if self._thread:
             self._thread.join(timeout=2)
-        if self.use_picam:
-            self.picam2.stop()
-        else:
-            self.cap.release()
+        self.cap.release()
 
     def _capture_loop(self):
         # We target ~15 FPS. Inference usually takes some time, so loop delay can be minimal.
         while self._running:
-            if self.use_picam:
-                # Picamera2 capture
-                try:
-                    frame = self.picam2.capture_array()
-                    # YOLO expects 3 channels. Picamera2 may return 4 channels (e.g. RGBA/XBGR8888).
-                    if len(frame.shape) == 3 and frame.shape[2] == 4:
-                        frame = np.ascontiguousarray(frame[:, :, :3])
-                except Exception as e:
-                    print(f"[CAMERA] Capture error: {e}")
-                    time.sleep(0.1)
-                    continue
-            else:
-                ret, frame = self.cap.read()
-                if not ret:
-                    time.sleep(0.1)
-                    continue
+            ret, frame = self.cap.read()
+            if not ret:
+                time.sleep(0.1)
+                continue
 
             highest_conf = 0.0
             best_box = None
@@ -136,6 +114,12 @@ class CameraModule:
                     self._current_frame = buffer.tobytes()
                 # Requirements: If no detection -> confidence = 0
                 self._current_confidence = highest_conf
+                self._vision_detected = highest_conf >= self.VISION_THRESHOLD
+
+            # Print detection output to console
+            if self.vision_enabled:
+                status = "DRONE DETECTED" if self._vision_detected else "No Drone"
+                print(f"[CAMERA] Confidence: {highest_conf*100:5.1f}% | {status}")
                 
             # Yield briefly to not peg CPU 100%
             time.sleep(0.01)
@@ -145,5 +129,6 @@ class CameraModule:
             return {
                 "frame": self._current_frame,
                 "confidence": self._current_confidence,
+                "vision_detected": self._vision_detected,
                 "vision_enabled": self.vision_enabled
             }

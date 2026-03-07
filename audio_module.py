@@ -1,6 +1,7 @@
 import threading
 import time
 import numpy as np
+import os
 
 # Try sounddevice (cross-platform: Windows, Mac, Linux)
 try:
@@ -8,6 +9,14 @@ try:
     SOUNDDEVICE_AVAILABLE = True
 except ImportError:
     SOUNDDEVICE_AVAILABLE = False
+
+# Try to load ML libraries for trained model inference
+try:
+    import librosa
+    import joblib
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
 
 # Fall back to subprocess arecord only on Linux / Raspberry Pi
 import subprocess
@@ -20,12 +29,34 @@ class AudioModule:
         self._running = False
         self._current_confidence = 0.0
         self._dominant_freq = 0
+        self._audio_detected = False
         self._lock = threading.Lock()
         self.audio_enabled = True
+        self.AUDIO_THRESHOLD = 0.5  # confidence threshold for audio-only drone detection
 
         self.RATE = 44100
         self.CHUNK_DURATION = 1.0  # seconds per analysis window
         self.CHUNK_SIZE = int(self.RATE * self.CHUNK_DURATION)
+
+        # --- Load trained audio model if available ---
+        self._ml_model = None
+        self._ml_sr = 22050
+        self._ml_n_mfcc = 20
+        model_path = 'models/audio_drone_model.joblib'
+        if ML_AVAILABLE and os.path.exists(model_path):
+            try:
+                data = joblib.load(model_path)
+                self._ml_model = data['model']
+                self._ml_sr = data.get('sample_rate', 22050)
+                self._ml_n_mfcc = data.get('n_mfcc', 20)
+                print(f"[AUDIO] Trained audio model loaded from {model_path}")
+            except Exception as e:
+                print(f"[AUDIO] Failed to load trained model: {e}. Using DSP fallback.")
+        else:
+            if not ML_AVAILABLE:
+                print("[AUDIO] librosa/joblib not installed. Using DSP-based detection.")
+            else:
+                print("[AUDIO] No trained model found. Run train_audio_model.py first. Using DSP fallback.")
 
         # Decide capture backend
         if SOUNDDEVICE_AVAILABLE:
@@ -57,6 +88,7 @@ class AudioModule:
             return {
                 "dominant_freq": self._dominant_freq,
                 "confidence": self._current_confidence,
+                "audio_detected": self._audio_detected,
                 "audio_enabled": self.audio_enabled,
             }
 
@@ -65,7 +97,8 @@ class AudioModule:
     # ------------------------------------------------------------------
 
     def audio_drone_score(self, chunk: np.ndarray, sample_rate: int) -> tuple:
-        """Calculate drone likelihood score from audio chunk."""
+        """Calculate drone likelihood score from audio chunk.
+        Uses trained ML model if available, otherwise falls back to DSP."""
         if chunk.size == 0:
             return 0.0, 0
 
@@ -76,6 +109,7 @@ class AudioModule:
         if rms < 0.001:
             return 0.0, 0
 
+        # Compute peak frequency (used by both paths)
         window = np.hanning(signal.shape[0]).astype(np.float32)
         spectrum = np.fft.rfft(signal * window)
         freqs = np.fft.rfftfreq(signal.shape[0], d=1.0 / sample_rate)
@@ -87,12 +121,40 @@ class AudioModule:
         peak_idx = np.argmax(power)
         peak_freq = int(freqs[peak_idx])
 
+        # --- ML model path ---
+        if self._ml_model is not None:
+            try:
+                score = self._predict_ml(signal, sample_rate)
+                return float(np.clip(score, 0.0, 1.0)), peak_freq
+            except Exception:
+                pass  # fall through to DSP
+
+        # --- DSP fallback ---
         total_power = float(np.sum(power)) + 1e-8
         drone_band = (freqs >= 100) & (freqs <= 1200)
         drone_band_energy = float(np.sum(power[drone_band])) / total_power
 
         score = 0.6 * drone_band_energy + 0.4 * min(rms / 0.05, 1.0)
         return float(np.clip(score, 0.0, 1.0)), peak_freq
+
+    def _predict_ml(self, signal: np.ndarray, sample_rate: int) -> float:
+        """Run the trained ML model on an audio chunk."""
+        # Resample to the model's expected sample rate if needed
+        if sample_rate != self._ml_sr:
+            signal = librosa.resample(signal, orig_sr=sample_rate, target_sr=self._ml_sr)
+
+        mfccs = librosa.feature.mfcc(y=signal, sr=self._ml_sr, n_mfcc=self._ml_n_mfcc)
+        mfcc_mean = np.mean(mfccs, axis=1)
+        mfcc_std = np.std(mfccs, axis=1)
+        spec_cent = np.mean(librosa.feature.spectral_centroid(y=signal, sr=self._ml_sr))
+        spec_bw = np.mean(librosa.feature.spectral_bandwidth(y=signal, sr=self._ml_sr))
+        spec_rolloff = np.mean(librosa.feature.spectral_rolloff(y=signal, sr=self._ml_sr))
+        zcr = np.mean(librosa.feature.zero_crossing_rate(signal))
+
+        features = np.concatenate([mfcc_mean, mfcc_std, [spec_cent, spec_bw, spec_rolloff, zcr]])
+        proba = self._ml_model.predict_proba(features.reshape(1, -1))[0]
+        # Return probability of drone class (class 1)
+        return float(proba[1])
 
     # ------------------------------------------------------------------
     # Capture loop
@@ -223,3 +285,10 @@ class AudioModule:
             # Exponential smoothing to reduce jitter in the UI
             self._current_confidence = 0.7 * self._current_confidence + 0.3 * confidence
             self._dominant_freq = int(peak_freq)
+            self._audio_detected = self._current_confidence >= self.AUDIO_THRESHOLD
+
+        # Print detection output to console so user sees results on the Pi
+        status = "DRONE DETECTED" if self._audio_detected else "No Drone"
+        conf_pct = self._current_confidence * 100
+        model_tag = "ML" if self._ml_model is not None else "DSP"
+        print(f"[AUDIO] [{model_tag}] Confidence: {conf_pct:5.1f}% | Freq: {peak_freq:5d} Hz | {status}")

@@ -57,29 +57,30 @@ def metrics():
     vis_conf = cam_data.get("confidence", 0.0)
     aud_conf = aud_data.get("confidence", 0.0)
     dom_freq = aud_data.get("dominant_freq", 0)
+    audio_detected = aud_data.get("audio_detected", False)
+    vision_detected = cam_data.get("vision_detected", False)
     
     fused = fusion.fuse(vis_conf, aud_conf)
     
-    # Check threshold for detection locally
-    drone_detected = fused["is_detected"]
+    # Local fusion detection (before API)
+    local_detected = fused["is_detected"]
     
     api_confirmed = False
     cloud_conf = 0.0
     
-    if drone_detected:
+    if local_detected:
         api_res = api_client.finalize_detection(cam_data.get("frame"), dom_freq, aud_conf)
         api_confirmed = api_res.get("drone_confirmed", False)
         cloud_conf = api_res.get("cloud_confidence", 0.0)
-        
-        # Optionally, stringently require API confirmation
-        drone_detected = api_confirmed
     
     return jsonify({
         "vision_confidence": fused["vision"],
         "audio_confidence": fused["audio"],
         "fusion_confidence": fused["fusion"],
         "dominant_freq": dom_freq,
-        "is_detected": drone_detected,
+        "vision_detected": vision_detected,
+        "audio_detected": audio_detected,
+        "is_detected": local_detected,
         "api_confirmed": api_confirmed,
         "cloud_confidence": cloud_conf,
         "vision_enabled": camera.vision_enabled,
