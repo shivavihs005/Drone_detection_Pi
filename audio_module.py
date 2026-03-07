@@ -59,12 +59,13 @@ class AudioModule:
                 print("[AUDIO] No trained model found. Run train_audio_model.py first. Using DSP fallback.")
 
         # Decide capture backend
-        if SOUNDDEVICE_AVAILABLE:
+        if platform.system() == "Linux":
+            # On Pi, prefer arecord for I2S INMP441 mic
+            self._backend = "arecord"
+            print("[AUDIO] Using arecord backend for I2S INMP441 mic on Pi.")
+        elif SOUNDDEVICE_AVAILABLE:
             self._backend = "sounddevice"
             print("[AUDIO] Using sounddevice backend (cross-platform).")
-        elif platform.system() == "Linux":
-            self._backend = "arecord"
-            print("[AUDIO] sounddevice not found. Falling back to arecord (Linux/Pi only).")
         else:
             self._backend = "mock"
             print("[AUDIO] No audio capture backend available. Using mock audio (random noise).")
@@ -204,22 +205,63 @@ class AudioModule:
 
             self._process(audio_data)
 
-    # ---- arecord (Linux / Raspberry Pi) ------------------------------
+    # ---- arecord (Linux / Raspberry Pi – I2S INMP441 mic) -----------
+
+    def _find_i2s_device(self):
+        """Auto-detect the I2S capture device from ALSA."""
+        try:
+            result = subprocess.run(
+                ["arecord", "-l"],
+                capture_output=True, text=True, timeout=5
+            )
+            # Parse output for card/device numbers
+            # Example line: "card 1: sndrpisimplecar [snd_rpi_simple_card], device 0: simple-card_codec_link ..."
+            for line in result.stdout.splitlines():
+                line_lower = line.lower()
+                if "card" in line_lower and "device" in line_lower:
+                    # Extract card and device number
+                    parts = line.split(":")
+                    card_part = parts[0].strip()  # "card 1"
+                    card_num = card_part.split()[-1]
+                    # Find device number
+                    for part in parts:
+                        if "device" in part.lower():
+                            dev_num = part.strip().split()[1].rstrip(",")
+                            device = f"plughw:{card_num},{dev_num}"
+                            print(f"[AUDIO] Found ALSA capture device: {device} ({line.strip()})")
+                            return device
+        except Exception as e:
+            print(f"[AUDIO] Could not auto-detect ALSA device: {e}")
+        # Default fallback
+        return "plughw:1,0"
 
     def _loop_arecord(self):
-        print("[AUDIO] Starting ALSA capture from plughw:1,0...")
+        device = self._find_i2s_device()
         rate = 48000
-        chunk_bytes = int(rate * self.CHUNK_DURATION * 3)  # S24_3LE = 3 bytes/sample
+        # INMP441 outputs 32-bit I2S data (24-bit data in upper bits)
+        # S32_LE = 4 bytes per sample, mono
+        bytes_per_sample = 4
+        chunk_samples = int(rate * self.CHUNK_DURATION)
+        chunk_bytes = chunk_samples * bytes_per_sample
+
+        print(f"[AUDIO] Starting I2S capture: device={device}, rate={rate}, format=S32_LE, mono")
 
         arecord_cmd = [
-            "arecord", "-D", "plughw:1,0",
-            "-f", "S24_3LE", "-r", str(rate), "-c", "1", "-t", "raw",
+            "arecord", "-D", device,
+            "-f", "S32_LE", "-r", str(rate), "-c", "1", "-t", "raw",
         ]
 
+        process = None
         try:
             process = subprocess.Popen(
-                arecord_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+                arecord_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
+            # Check for immediate errors
+            time.sleep(0.3)
+            if process.poll() is not None:
+                err = process.stderr.read().decode(errors='ignore')
+                print(f"[AUDIO] arecord failed to start: {err}")
+                process = None
         except Exception as e:
             print(f"[AUDIO] Failed to start arecord: {e}")
             process = None
@@ -235,18 +277,16 @@ class AudioModule:
             if process:
                 raw_data = process.stdout.read(chunk_bytes)
                 if len(raw_data) == chunk_bytes:
-                    # Convert S24_3LE → int32 → float32
-                    padded = np.zeros(len(raw_data) // 3 * 4, dtype=np.uint8)
-                    padded[0::4] = np.frombuffer(raw_data[0::3], dtype=np.uint8)
-                    padded[1::4] = np.frombuffer(raw_data[1::3], dtype=np.uint8)
-                    padded[2::4] = np.frombuffer(raw_data[2::3], dtype=np.uint8)
-                    padded[3::4] = (padded[2::4] > 127) * 255
-                    audio_data = padded.view(np.int32).astype(np.float32)
+                    # Convert S32_LE to float32 and normalize
+                    # INMP441 puts 24-bit data in the upper bits of 32-bit word
+                    int_data = np.frombuffer(raw_data, dtype=np.int32)
+                    # Normalize to [-1.0, 1.0] range
+                    audio_data = int_data.astype(np.float32) / 2147483648.0
                 else:
-                    audio_data = np.zeros(int(rate * self.CHUNK_DURATION), dtype=np.float32)
+                    audio_data = np.zeros(chunk_samples, dtype=np.float32)
             else:
                 time.sleep(self.CHUNK_DURATION)
-                audio_data = np.zeros(int(rate * self.CHUNK_DURATION), dtype=np.float32)
+                audio_data = np.zeros(chunk_samples, dtype=np.float32)
 
             self._process(audio_data, sample_rate=rate)
 
